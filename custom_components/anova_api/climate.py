@@ -59,7 +59,20 @@ class AnovaOven(ClimateEntity):
         self._attr_current_temperature = 0.0
         self._attr_target_temperature = 0.0
         self._attr_hvac_mode = HVACMode.OFF
+        self._active_mode = "dry"
         self._remove_cb = None
+
+    @property
+    def min_temp(self) -> float:
+        """Return the minimum temperature."""
+        return 25.0
+
+    @property
+    def max_temp(self) -> float:
+        """Return the maximum temperature."""
+        if self._active_mode == "wet":
+            return 100.0
+        return 250.0
 
     async def async_added_to_hass(self) -> None:
         """Register callbacks."""
@@ -81,11 +94,34 @@ class AnovaOven(ClimateEntity):
         if not state:
             return
 
-        # Assuming the raw payload has nodes.temperatureBulbs.dry.current
-        # We parse speculatively based on typical structure
         try:
-            curr = state.raw_state.get("payload", {}).get("temperatureBulbs", {}).get("dry", {}).get("current", {}).get("celsius")
-            targ = state.raw_state.get("payload", {}).get("temperatureBulbs", {}).get("dry", {}).get("setpoint", {}).get("celsius")
+            # We need to extract the active bulb mode and temperature.
+            payload = state.raw_state.get("payload", {})
+            # Look at the active stage
+            active_id = payload.get("activeStageId")
+            stages = payload.get("stages", [])
+            active_stage = stages[0] if stages else {}
+            for s in stages:
+                if s.get("id") == active_id:
+                    active_stage = s
+                    break
+            
+            do_block = active_stage.get("do", active_stage)
+            bulbs = do_block.get("temperatureBulbs", {})
+            
+            new_mode = bulbs.get("mode", "dry")
+            self._active_mode = new_mode
+            
+            # Extract temperatures
+            t_block = bulbs.get(new_mode, {})
+            curr = t_block.get("current", {}).get("celsius")
+            
+            if curr is None and "nodes" in payload:
+                # v2 ovens put current temps in "nodes"
+                curr = payload.get("nodes", {}).get("temperatureBulbs", {}).get(new_mode, {}).get("current", {}).get("celsius")
+                
+            targ = t_block.get("setpoint", {}).get("celsius")
+            
             if curr is not None:
                 self._attr_current_temperature = curr
             if targ is not None:
@@ -106,31 +142,12 @@ class AnovaOven(ClimateEntity):
         if temperature is None:
             return
             
-        # Simplest start command with new target temp
-        cmd = {
-            "command": "CMD_APO_START",
-            "requestId": str(uuid.uuid4()),
-            "payload": {
-                "id": self._device_id,
-                "type": "CMD_APO_START",
-                "payload": {
-                    "cookId": str(uuid.uuid4()),
-                    "cookerId": self._device_id,
-                    "type": self._model,
-                    "stages": [{
-                        "id": str(uuid.uuid4()),
-                        "do": {
-                            "type": "cook",
-                            "temperatureBulbs": {
-                                "mode": "dry",
-                                "dry": {"setpoint": {"celsius": temperature}}
-                            }
-                        }
-                    }]
-                }
+        await self._client.patch_active_stage(self._device_id, {
+            "temperatureBulbs": {
+                "mode": self._active_mode,
+                self._active_mode: {"setpoint": {"celsius": temperature}}
             }
-        }
-        await self._client.send_command(cmd)
+        })
 
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
         """Set new target hvac mode."""

@@ -6,8 +6,8 @@ from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers import storage
-from homeassistant.components.frontend import async_register_built_in_panel
 from homeassistant.components.http import StaticPathConfig
+from homeassistant.components.panel_custom import async_register_panel
 import asyncio
 import os
 
@@ -71,18 +71,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await hass.http.async_register_static_paths([
             StaticPathConfig("/anova-panel", www_dir, False)
         ])
-        async_register_built_in_panel(
+        await async_register_panel(
             hass,
-            component_name="custom",
+            frontend_url_path="anova",
+            webcomponent_name="anova-panel",
             sidebar_title="Anova",
             sidebar_icon="mdi:stove",
-            frontend_url_path="anova",
-            config={
-                "name": "anova-panel",
-                "embed_iframe": False,
-                "trust_external": False,
-                "module_url": "/anova-panel/anova-panel.js"
-            },
+            module_url="/anova-panel/anova-panel.js",
+            embed_iframe=False,
             require_admin=False,
         )
     except Exception as e:

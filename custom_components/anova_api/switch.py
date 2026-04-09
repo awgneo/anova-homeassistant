@@ -25,31 +25,24 @@ async def async_setup_entry(
     entities = []
     for device_id, device in client.devices.items():
         if device.type == DeviceType.APO:
-            entities.extend([
-                AnovaElementSwitch(client, device_id, device.name, device.model, "top", "Top Heating Element", "mdi:heating-coil"),
-                AnovaElementSwitch(client, device_id, device.name, device.model, "bottom", "Bottom Heating Element", "mdi:heating-coil"),
-                AnovaElementSwitch(client, device_id, device.name, device.model, "rear", "Rear Heating Element", "mdi:heating-coil"),
-                AnovaVentSwitch(client, device_id, device.name, device.model),
-            ])
+            entities.append(AnovaSousVideSwitch(client, device_id, device.name, device.model))
             
     async_add_entities(entities)
 
 
-class AnovaElementSwitch(SwitchEntity):
-    """Heating element switch for Anova Precision Oven."""
+class AnovaSousVideSwitch(SwitchEntity):
+    """Sous Vide mode switch for Anova Precision Oven."""
 
     _attr_has_entity_name = True
+    _attr_name = "Sous Vide Mode"
+    _attr_icon = "mdi:water-boiler"
 
-    def __init__(self, client: AnovaClient, device_id: str, name: str, model: str, element_key: str, entity_name: str, icon: str) -> None:
-        """Initialize the switch."""
+    def __init__(self, client: AnovaClient, device_id: str, name: str, model: str) -> None:
+        """Initialize."""
         self._client = client
         self._device_id = device_id
         self._model = model
-        self._element_key = element_key
-        
-        self._attr_name = entity_name
-        self._attr_icon = icon
-        self._attr_unique_id = f"anova_apo_{device_id}_heater_{element_key}"
+        self._attr_unique_id = f"anova_apo_{device_id}_sous_vide"
         
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, device_id)},
@@ -57,6 +50,7 @@ class AnovaElementSwitch(SwitchEntity):
             manufacturer="Anova",
             model=model,
         )
+        self._attr_is_on = False
         self._remove_cb = None
 
     async def async_added_to_hass(self) -> None:
@@ -80,66 +74,31 @@ class AnovaElementSwitch(SwitchEntity):
             return
 
         try:
-            # e.g., payload.stages[0].do.heatingElements.top.on
-            # Fallback speculatively
-            heaters = state.raw_state.get("payload", {}).get("heatingElements", {})
-            val = heaters.get(self._element_key, {}).get("on")
-            if val is not None:
-                self._attr_is_on = val
+            raw_payload = state.raw_state.get("payload", {})
+            active_id = raw_payload.get("activeStageId")
+            stages = raw_payload.get("stages", [])
+            active_stage = stages[0] if stages else {}
+            for s in stages:
+                if s.get("id") == active_id:
+                    active_stage = s
+                    break
+            
+            do_block = active_stage.get("do", active_stage)
+            mode = do_block.get("temperatureBulbs", {}).get("mode")
+            if mode:
+                self._attr_is_on = (mode == "wet")
                 self.async_write_ha_state()
         except Exception:
             pass
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn the entity on."""
-        # This requires fetching current known states of other heaters and sending a new APO_START
-        # Simplified placeholder for hardware interaction logic
-        pass
+        await self._client.patch_active_stage(self._device_id, {
+            "temperatureBulbs": {"mode": "wet"}
+        })
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn the entity off."""
-        pass
-
-
-class AnovaVentSwitch(SwitchEntity):
-    """Exhaust vent switch for Anova Precision Oven."""
-
-    _attr_has_entity_name = True
-    _attr_name = "Exhaust Vent"
-    _attr_icon = "mdi:fan-off"
-
-    def __init__(self, client: AnovaClient, device_id: str, name: str, model: str) -> None:
-        """Initialize."""
-        self._client = client
-        self._device_id = device_id
-        self._model = model
-        self._attr_unique_id = f"anova_apo_{device_id}_vent"
-        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, device_id)})
-        self._remove_cb = None
-
-    async def async_added_to_hass(self) -> None:
-        self._remove_cb = self._client.register_callback(self._handle_update)
-
-    async def async_will_remove_from_hass(self) -> None:
-        if self._remove_cb:
-            self._remove_cb()
-
-    @callback
-    def _handle_update(self, device_id: str, payload: dict) -> None:
-        if device_id != self._device_id:
-            return
-        state = self._client.get_apo_state(self._device_id)
-        if state:
-            try:
-                vent = state.raw_state.get("payload", {}).get("vent", {}).get("open")
-                if vent is not None:
-                    self._attr_is_on = vent
-                    self.async_write_ha_state()
-            except Exception:
-                pass
-
-    async def async_turn_on(self, **kwargs: Any) -> None:
-        pass
-
-    async def async_turn_off(self, **kwargs: Any) -> None:
-        pass
+        await self._client.patch_active_stage(self._device_id, {
+            "temperatureBulbs": {"mode": "dry"}
+        })

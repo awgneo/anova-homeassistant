@@ -1,8 +1,10 @@
 """Anova API Client."""
 
 import asyncio
+import copy
 import json
 import logging
+import uuid
 from typing import Dict, Callable, Any, Optional
 
 import aiohttp
@@ -87,6 +89,70 @@ class AnovaClient:
         msg = json.dumps(command)
         _LOGGER.debug("Sending payload: %s", msg)
         await self._ws.send_str(msg)
+
+    def _deep_update(self, d: dict, u: dict) -> dict:
+        """Deep merge dict u into dict d."""
+        for k, v in u.items():
+            if isinstance(v, dict):
+                d[k] = self._deep_update(d.get(k, {}), v)
+            else:
+                d[k] = v
+        return d
+
+    async def patch_active_stage(self, device_id: str, overrides: Dict[str, Any]) -> None:
+        """Patch the active cooking stage without destroying the whole cook."""
+        device = self._devices.get(device_id)
+        if not device or device.type != DeviceType.APO:
+            return
+
+        state = self._apo_states.get(device_id)
+        raw_state = state.raw_state.get("payload", {}) if state else {}
+        stages = raw_state.get("stages", [])
+        
+        # Determine target to patch (active stage or stage 0)
+        new_stages = copy.deepcopy(stages) if stages else [{
+            "id": str(uuid.uuid4()),
+            "stepType": "stage",
+            "type": "cook",
+            "do": {
+                "type": "cook",
+                "fan": { "speed": 100 },
+                "heatingElements": { "top": {"on": False}, "bottom": {"on": False}, "rear": {"on": True} },
+                "exhaustVent": { "state": "closed" },
+                "temperatureBulbs": { "mode": "dry", "dry": { "setpoint": { "celsius": 175 } } },
+            },
+            "rackPosition": 3
+        }]
+
+        # Patch the active stage (or index 0 if not found)
+        # Because Anova v1 and v2 nest differently, we patch both the top-level stage AND the 'do' block if it exists
+        target_stage = new_stages[0]
+        active_id = raw_state.get("activeStageId")
+        if active_id:
+            for s in new_stages:
+                if s.get("id") == active_id:
+                    target_stage = s
+                    break
+
+        self._deep_update(target_stage, overrides)
+        if "do" in target_stage:
+            self._deep_update(target_stage["do"], overrides)
+
+        cmd = {
+            "command": "CMD_APO_START",
+            "requestId": str(uuid.uuid4()),
+            "payload": {
+                "id": device_id,
+                "type": "CMD_APO_START",
+                "payload": {
+                    "cookId": raw_state.get("cookId") or str(uuid.uuid4()),
+                    "cookerId": device_id,
+                    "type": device.model,
+                    "stages": new_stages
+                }
+            }
+        }
+        await self.send_command(cmd)
 
     async def _listen(self):
         """Listen to websocket messages."""
