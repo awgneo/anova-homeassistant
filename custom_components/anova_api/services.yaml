@@ -1,0 +1,48 @@
+save_recipe:
+  name: Save Recipe
+  description: Save a multi-stage Apo recipe to central storage.
+  fields:
+    name:
+      name: Recipe Name
+      description: The name of the recipe (must be unique).
+      required: true
+      selector:
+        text:
+    stages:
+      name: Stages
+      description: List of stage objects
+      required: true
+      selector:
+        object:
+delete_recipe:
+  name: Delete Recipe
+  description: Delete a saved recipe by name.
+  fields:
+    name:
+      name: Recipe Name
+      description: The name of the recipe to delete.
+      required: true
+      selector:
+        text:
+export_telemetry:
+  name: Export Telemetry
+  description: Request a telemetry export URL
+  fields:
+    device_id:
+      name: Device ID
+      description: Target device ID
+      required: true
+      selector:
+        text:
+    start_date:
+      name: Start Date
+      description: Start Date (YYYY-MM-DD)
+      required: true
+      selector:
+        text:
+    end_date:
+      name: End Date
+      description: End Date (YYYY-MM-DD)
+      required: true
+      selector:
+        text:

@@ -1,0 +1,17 @@
+# Ignore AI agent data
+.agent/
+READING/
+
+# Python caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Virtual environments
+venv/
+env/
+.env
+
+# MacOS
+.DS_Store

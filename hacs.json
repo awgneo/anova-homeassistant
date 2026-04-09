@@ -1,0 +1,6 @@
+{
+  "name": "Anova API",
+  "render_readme": true,
+  "file_name": "anova_api",
+  "iot_class": "cloud_push"
+}

@@ -1,0 +1,14 @@
+{
+  "domain": "anova_api",
+  "name": "Anova API",
+  "codeowners": ["@awgneo"],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://github.com/awgneo/anova",
+  "integration_type": "hub",
+  "iot_class": "cloud_push",
+  "issue_tracker": "https://github.com/awgneo/anova/issues",
+  "quality_scale": "platinum",
+  "requirements": [],
+  "version": "1.0.0"
+}
