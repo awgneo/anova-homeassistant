@@ -162,5 +162,7 @@ class AnovaOven(ClimateEntity):
             }
             await self._client.send_command(cmd)
         elif hvac_mode == HVACMode.HEAT:
-            if self._attr_target_temperature:
-                await self.async_set_temperature(temperature=self._attr_target_temperature)
+            targ = self._attr_target_temperature
+            if not targ:  # Catches 0.0 or None
+                targ = 176.67  # Default 350 F
+            await self.async_set_temperature(temperature=targ)

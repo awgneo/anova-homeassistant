@@ -154,6 +154,7 @@ class AnovaClient:
                     "type": device.model,
                     "originSource": "api",
                     "cookableType": "manual",
+                    "cookableId": "",
                     "title": "",
                     "stages": new_stages
                 }
@@ -251,5 +252,10 @@ class AnovaClient:
         
         # State mapping is highly speculative without full telemetry logs.
         # Store raw payload entirely and parse common fields.
-        state.state = payload.get("status", payload.get("state", state.state))
-        state.is_running = state.state not in ["idle", "stopped"]
+        status = payload.get("status", payload.get("state"))
+        if status is not None:
+            state.state = status
+            state.is_running = status.lower() not in ["idle", "stopped", "standby"]
+        else:
+            # If no explicit status string, we can infer running state if there's an active stage
+            state.is_running = bool(payload.get("activeStageId"))
