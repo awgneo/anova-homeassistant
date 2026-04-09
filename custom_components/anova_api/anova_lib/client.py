@@ -79,9 +79,6 @@ class AnovaClient:
         
         if self._ws and not self._ws.closed:
             await self._ws.close()
-            
-        if self._session:
-            await self._session.close()
 
     async def send_command(self, command: Dict[str, Any]):
         """Send a command to the websocket."""

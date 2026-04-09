@@ -7,6 +7,8 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers import storage
 from homeassistant.components.frontend import async_register_built_in_panel
+from homeassistant.components.http import StaticPathConfig
+import asyncio
 
 from .anova_lib.client import AnovaClient
 from .const import DOMAIN, CONF_TOKEN, RECIPE_STORAGE_KEY, RECIPE_STORAGE_VERSION
@@ -38,6 +40,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if not success:
             _LOGGER.error("Failed to connect to Anova API")
             return False
+            
+        # Wait up to 3 seconds for the initial device discovery payloads
+        for _ in range(30):
+            if client.devices:
+                break
+            await asyncio.sleep(0.1)
+            
     except Exception as err:
         _LOGGER.error("Error connecting to Anova API: %s", err)
         return False
@@ -57,11 +66,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Register the custom frontend panel
     # We will serve the panel assets from the www directory
     try:
-        hass.http.register_static_path(
-            "/anova-panel",
-            hass.config.path("custom_components/anova_api/www"),
-            cache_headers=False,
-        )
+        await hass.http.async_register_static_paths([
+            StaticPathConfig("/anova-panel", hass.config.path("custom_components/anova_api/www"), False)
+        ])
         async_register_built_in_panel(
             hass,
             component_name="custom",
