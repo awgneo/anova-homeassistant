@@ -114,6 +114,8 @@ class AnovaClient:
             "id": str(uuid.uuid4()),
             "stepType": "stage",
             "type": "cook",
+            "title": "",
+            "description": "",
             "do": {
                 "type": "cook",
                 "fan": { "speed": 100 },
@@ -121,6 +123,8 @@ class AnovaClient:
                 "exhaustVent": { "state": "closed" },
                 "temperatureBulbs": { "mode": "dry", "dry": { "setpoint": { "celsius": 175 } } },
             },
+            "exit": { "conditions": { "and": {} } },
+            "entry": { "conditions": { "and": {} } },
             "rackPosition": 3
         }]
 
@@ -148,6 +152,9 @@ class AnovaClient:
                     "cookId": raw_state.get("cookId") or str(uuid.uuid4()),
                     "cookerId": device_id,
                     "type": device.model,
+                    "originSource": "api",
+                    "cookableType": "manual",
+                    "title": "",
                     "stages": new_stages
                 }
             }
