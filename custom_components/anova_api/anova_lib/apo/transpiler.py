@@ -63,11 +63,10 @@ def cook_to_payload(cook: APOCook, device: AnovaDevice) -> dict:
         }
         
         if device.model == "oven_v2":
+            # v2 oven schema
             s_dict = {
                 "id": stage.id,
                 "title": "",
-                "description": "",
-                "rackPosition": 3,
                 "do": {
                     "type": "cook",
                     "fan": {"speed": speed_int},
@@ -86,15 +85,9 @@ def cook_to_payload(cook: APOCook, device: AnovaDevice) -> dict:
                 }
                 
             if isinstance(stage.advance, APOTimer):
-                trigger_map = {
-                    APOTimerTrigger.FOOD_DETECTED: "on-detection",
-                    APOTimerTrigger.IMMEDIATELY: "immediately",
-                    APOTimerTrigger.PREHEATED: "when-preheated",
-                    APOTimerTrigger.MANUALLY: "manual"
-                }
                 s_dict["do"]["timer"] = {
                     "initial": stage.advance.duration,
-                    "startType": trigger_map.get(stage.advance.trigger, "immediately")
+                    "entry": {"conditions": {"and": {}}}
                 }
                 s_dict["exit"]["conditions"]["and"] = {"nodes.timer.mode": {"=": "completed"}}
                 
@@ -111,7 +104,7 @@ def cook_to_payload(cook: APOCook, device: AnovaDevice) -> dict:
                 # we inject a massive 24-hour dummy manual timer block.
                 s_dict["do"]["timer"] = {
                     "initial": 86400,
-                    "startType": "manual"
+                    "entry": {"conditions": {"and": {}}}
                 }
                 s_dict["exit"]["conditions"]["and"] = {"nodes.timer.mode": {"=": "completed"}}
                 
@@ -170,7 +163,8 @@ def cook_to_payload(cook: APOCook, device: AnovaDevice) -> dict:
             "originSource": "android",
             "cookableType": "manual",
             "cookableId": "",
-            "title": cook.recipe.title
+            "title": cook.recipe.title,
+            "rackPosition": 3
         })
         
     return inner_payload
