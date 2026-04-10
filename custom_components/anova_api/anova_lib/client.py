@@ -115,7 +115,7 @@ class AnovaClient:
         if not device or device.type != DeviceType.APO:
             return
             
-        payload_dict = apo.cook_to_payload(cook, device.model)
+        payload_dict = apo.cook_to_payload(cook, device)
         
         cmd = {
             "command": "CMD_APO_START",

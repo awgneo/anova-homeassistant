@@ -8,6 +8,7 @@ from .models import (
     APOCook, APORecipe, APOStage, APOTimer, APOTimerTrigger,
     APOProbe, APOHeatingElement, APOFanSpeed, APONodes, APOState
 )
+from ..device import AnovaDevice
 
 def _generate_uuid() -> str:
     """Generate a UUID string suitable for Anova stages."""
@@ -27,7 +28,7 @@ def recipe_to_cook(recipe: APORecipe) -> APOCook:
         active_stage_id=cloned.stages[0].id if cloned.stages else ""
     )
 
-def cook_to_payload(cook: APOCook, device_model: str) -> dict:
+def cook_to_payload(cook: APOCook, device: AnovaDevice) -> dict:
     """Forward Transpiler. Converts APOCook to the CMD_APO_START payload."""
     stages = []
     
@@ -37,9 +38,9 @@ def cook_to_payload(cook: APOCook, device_model: str) -> dict:
             
         # Clamp temperature constraints based on model and elements
         target_temp = stage.temperature
-        if device_model == "oven_v2" and stage.heating_elements == APOHeatingElement.BOTTOM and target_temp > 230.0:
+        if device.model == "oven_v2" and stage.heating_elements == APOHeatingElement.BOTTOM and target_temp > 230.0:
             target_temp = 230.0 # 446F Limit
-        elif device_model != "oven_v2" and stage.heating_elements == APOHeatingElement.BOTTOM and target_temp > 180.0:
+        elif device.model != "oven_v2" and stage.heating_elements == APOHeatingElement.BOTTOM and target_temp > 180.0:
             target_temp = 180.0 # 356F Limit
             
         top_on = "top" in stage.heating_elements.value
@@ -61,7 +62,7 @@ def cook_to_payload(cook: APOCook, device_model: str) -> dict:
             mode: {"setpoint": {"celsius": target_temp}}
         }
         
-        if device_model == "oven_v2":
+        if device.model == "oven_v2":
             s_dict = {
                 "id": stage.id,
                 "title": "",
@@ -85,21 +86,24 @@ def cook_to_payload(cook: APOCook, device_model: str) -> dict:
                 }
                 
             if isinstance(stage.advance, APOTimer):
-                timer_entry = {"conditions": {}}
-                if stage.advance.trigger == APOTimerTrigger.FOOD_DETECTED:
-                    timer_entry["conditions"] = {
-                        "or": {
-                            "userAction": {"=": True},
-                            "nodes.cavityCamera.isEmpty": {"=": False}
-                        }
-                    }
-                else:
-                    timer_entry["conditions"] = {"and": {}}
-                    
+                trigger_map = {
+                    APOTimerTrigger.FOOD_DETECTED: "on-detection",
+                    APOTimerTrigger.IMMEDIATELY: "immediately",
+                    APOTimerTrigger.PREHEATED: "when-preheated",
+                    APOTimerTrigger.MANUALLY: "manual"
+                }
                 s_dict["do"]["timer"] = {
                     "initial": stage.advance.duration,
-                    "entry": timer_entry
+                    "startType": trigger_map.get(stage.advance.trigger, "immediately")
                 }
+                s_dict["exit"]["conditions"]["and"] = {"nodes.timer.mode": {"=": "completed"}}
+                
+            elif isinstance(stage.advance, APOProbe):
+                s_dict["do"]["probe"] = {
+                    "setpoint": {"celsius": stage.advance.target}
+                }
+                s_dict["exit"]["conditions"]["and"] = {"nodes.temperatureProbe.current.celsius": {">=": stage.advance.target}}
+                
             stages.append(s_dict)
             
         else:
@@ -118,19 +122,38 @@ def cook_to_payload(cook: APOCook, device_model: str) -> dict:
                 "stageTransitionType": "automatic",
                 "rackPosition": 3
             }
+            if stage.steam > 0:
+                s_dict["steamGenerators"] = {
+                    "mode": "relative-humidity",
+                    "relativeHumidity": {"setpoint": stage.steam}
+                }
             
             if isinstance(stage.advance, APOTimer):
-                s_dict["timer"] = {"initial": stage.advance.duration}
+                trigger_map = {
+                    APOTimerTrigger.FOOD_DETECTED: "on-detection",
+                    APOTimerTrigger.IMMEDIATELY: "immediately",
+                    APOTimerTrigger.PREHEATED: "when-preheated",
+                    APOTimerTrigger.MANUALLY: "manual"
+                }
+                s_dict["timer"] = {
+                    "initial": stage.advance.duration,
+                    "startType": trigger_map.get(stage.advance.trigger, "immediately")
+                }
+            elif isinstance(stage.advance, APOProbe):
+                s_dict["probe"] = {
+                    "setpoint": {"celsius": stage.advance.target}
+                }
                 
             stages.append(s_dict)
             
     # Wrap in payload
     inner_payload = {
         "cookId": cook.cook_id or _generate_uuid(),
+        "cookerId": device.device_id,
         "stages": stages
     }
     
-    if device_model == "oven_v2":
+    if device.model == "oven_v2":
         inner_payload.update({
             "type": "oven_v2",
             "originSource": "api",

@@ -15,6 +15,7 @@ from anova_lib.apo import (
     APORecipe, APOStage, APOTimer, APOTimerTrigger, 
     APOHeatingElement, APOFanSpeed
 )
+from anova_lib.device import AnovaDevice, DeviceType
 
 RAW_V2_PAYLOAD = {
     'nodes': {
@@ -174,10 +175,19 @@ def test_cook_to_payload():
         ]
     )
     cook = recipe_to_cook(recipe)
-    payload = cook_to_payload(cook, "oven_v2")
+    
+    device = AnovaDevice(
+        device_id="dummy_device_id",
+        type=DeviceType.APO,
+        model="oven_v2",
+        name="Test Oven"
+    )
+    
+    payload = cook_to_payload(cook, device)
     
     assert "type" in payload
     assert payload["type"] == "oven_v2"
+    assert payload["cookerId"] == "dummy_device_id"
     assert len(payload["stages"]) == 1
     
     stg = payload["stages"][0]
@@ -194,7 +204,7 @@ def test_cook_to_payload():
     
     # Verify condition formatting
     assert do_block["timer"]["initial"] == 600
-    assert do_block["timer"]["entry"]["conditions"] == {"and": {}} # Manually trigger
+    assert do_block["timer"]["startType"] == "manual" # Manually trigger
     
     # Node telemetry MUST NOT EXIST in upstream payload
     assert "nodes" not in payload
