@@ -65,7 +65,7 @@ def cook_to_payload(cook: APOCook, device: AnovaDevice) -> dict:
         if device.model == "oven_v2":
             # v2 oven schema
             s_dict = {
-                "id": stage.id,
+                "id": stage.id if stage.id.startswith("android-") else f"android-{stage.id}",
                 "title": "",
                 "do": {
                     "type": "cook",
@@ -152,7 +152,7 @@ def cook_to_payload(cook: APOCook, device: AnovaDevice) -> dict:
             
     # Wrap in payload
     inner_payload = {
-        "cookId": cook.cook_id or _generate_uuid(),
+        "cookId": f"android-{cook.cook_id or _generate_uuid()}",
         "cookerId": device.device_id,
         "stages": stages
     }
@@ -171,7 +171,8 @@ def cook_to_payload(cook: APOCook, device: AnovaDevice) -> dict:
 
 def synthesize_cook_from_nodes(nodes: APONodes) -> APOCook:
     """Reconstruct an active logical cook session from blind physical telemetry."""
-    s = APOStage(id=_generate_uuid())
+    # To correctly spoof mobile clients, we dynamically prefix IDs
+    s = APOStage(id=f"android-{_generate_uuid()}")
     
     if nodes.temperature_bulbs_mode == "wet":
         s.sous_vide = True
@@ -195,9 +196,7 @@ def synthesize_cook_from_nodes(nodes: APONodes) -> APOCook:
     else:
         s.heating_elements = APOHeatingElement.REAR
         
-    # Let fan simply default to max, as telemetry doesn't reliably map enum speeds cleanly
-    # And we don't know the exact probe targets if any.
-    return APOCook(recipe=APORecipe(title="Recovery", stages=[s]), active_stage_index=0)
+    return APOCook(id=f"android-{_generate_uuid()}", recipe=APORecipe(title="Recovery", stages=[s]), active_stage_index=0)
 
 def payload_to_state(raw_payload: dict) -> APOState:
     """Parses raw websocket telemetry into a pristine APOState."""
