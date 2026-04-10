@@ -96,17 +96,15 @@ def cook_to_payload(cook: APOCook, device: AnovaDevice) -> dict:
                     "setpoint": {"celsius": stage.advance.target}
                 }
                 s_dict["exit"]["conditions"]["and"] = {"nodes.temperatureProbe.current.celsius": {">=": stage.advance.target}}
-                
             else:
-                # The official iOS/Android apps aggressively parse the active "stages" config and silently 
-                # ignore/fail to render stages that entirely lack a 'timer' or 'probe' block inside the 'do' payload.
-                # To maintain bidirectional mobile app UI synchronization on these infinite Home Assistant "bakes",
-                # we inject a massive 24-hour dummy manual timer block.
-                s_dict["do"]["timer"] = {
-                    "initial": 86400,
-                    "entry": {"conditions": {"and": {}}}
-                }
-                s_dict["exit"]["conditions"]["and"] = {"nodes.timer.mode": {"=": "completed"}}
+                s_dict["exit"]["conditions"]["and"] = {}
+                
+            # Formulate the explicit preheat condition used securely by Android platform API logic
+            if stage.sous_vide:
+                stage_entry_cond = {"nodes.temperatureBulbs.wet.current.celsius": {">=": stage.temperature}}
+            else:
+                stage_entry_cond = {"nodes.temperatureBulbs.dry.current.celsius": {">=": stage.temperature}}
+            s_dict["entry"]["conditions"]["and"] = stage_entry_cond
                 
             stages.append(s_dict)
             
