@@ -194,7 +194,7 @@ def synthesize_cook_from_nodes(nodes: APONodes) -> APOCook:
     else:
         s.heating_elements = APOHeatingElement.REAR
         
-    return APOCook(id=f"android-{_generate_uuid()}", recipe=APORecipe(title="Recovery", stages=[s]), active_stage_index=0)
+    return APOCook(cook_id=f"android-{_generate_uuid()}", recipe=APORecipe(title="Recovery", stages=[s]), active_stage_index=0)
 
 def payload_to_state(raw_payload: dict) -> APOState:
     """Parses raw websocket telemetry into a pristine APOState."""
