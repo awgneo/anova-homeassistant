@@ -318,6 +318,15 @@ def payload_to_state(raw_payload: dict) -> APOState:
         state_str = "idle"
         is_running = bool(raw_payload.get("activeStageId"))
         
+    # Sanity check: In V2 ovens without explicit timer starts, the controller 
+    # sometimes drops back to absolute 'idle' while simultaneously running the physical
+    # heaters. Overlay the physical execution parameters on top of the logical string.
+    if not is_running:
+        if nodes.rear_heater_on or nodes.bottom_heater_on or nodes.top_heater_on:
+            is_running = True
+            if state_str == "idle":
+                state_str = "cooking"
+                
     return APOState(
         is_running=is_running,
         state=state_str,

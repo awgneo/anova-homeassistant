@@ -1,0 +1,187 @@
+{
+    "nodes": {
+        "temperatureProbe": {
+            "connected": False,
+            "current": {
+                "celsius": 0
+            },
+            "ntcConnected": True
+        },
+        "powerBoardFan": {
+            "on": False,
+            "numberOfOverCurrent": 0,
+            "dc12VStatus": "no-error"
+        },
+        "temperatureBulbs": {
+            "dry": {
+                "numberOfOverCurrent": 0,
+                "current": {
+                    "celsius": 50.49
+                },
+                "setpoint": {
+                    "celsius": 176.67
+                }
+            },
+            "dryBottom": {
+                "numberOfOverCurrent": 0,
+                "ntcConnected": True,
+                "current": {
+                    "celsius": 37.1
+                }
+            },
+            "wet": {
+                "current": {
+                    "celsius": 29.8
+                },
+                "numberOfOverCurrent": 0,
+                "dc12VInletStatus": "no-error",
+                "ntcConnected": True,
+                "dosed": False
+            },
+            "dryTop": {
+                "numberOfOverCurrent": 0,
+                "current": {
+                    "celsius": 53.52
+                },
+                "ntcConnected": True
+            },
+            "mode": "dry"
+        },
+        "steamGenerators": {
+            "boiler": {
+                "watts": 0,
+                "dc12VOutletValveDescaleStatus": "no-error",
+                "usageHours": 17.4,
+                "numberOfOverCurrentOutletValveDescale": 0,
+                "descaleRequired": False,
+                "numberOfOverCurrentInletPump": 0,
+                "ntcConnected": True,
+                "dc12VInletPumpStatus": "no-error",
+                "failed": False,
+                "celsius": 25.27,
+                "dosed": False
+            },
+            "evaporator": {
+                "ntcConnected": True,
+                "watts": 0,
+                "failed": False,
+                "celsius": 24.21,
+                "usageHours": 9
+            },
+            "mode": "idle"
+        },
+        "door": {
+            "closed": True
+        },
+        "exhaustVent": {
+            "state": "closed",
+            "numberOfOverCurrent": 0,
+            "dc12VStatus": "no-error"
+        },
+        "cavityLamp": {
+            "on": False
+        },
+        "displayFan": {
+            "numberOfOverCurrent": 0,
+            "dc12VStatus": "no-error",
+            "speed": "mid"
+        },
+        "heatingElements": {
+            "top": {
+                "usageHours": 1137.9,
+                "failed": False,
+                "on": False,
+                "watts": 0
+            },
+            "rear": {
+                "usageHours": 2530.2,
+                "watts": 0,
+                "on": True,
+                "failed": False
+            },
+            "bottom": {
+                "failed": False,
+                "watts": 0,
+                "usageHours": 346.7,
+                "on": False
+            }
+        },
+        "doorLamp": {
+            "preferences": "on",
+            "on": False
+        },
+        "dc12VLine": {
+            "numberOfRejections": 0,
+            "numberOfFaults": 0
+        },
+        "cavityCamera": {
+            "enabled": True,
+            "lastDetectionMillis": 1325646147,
+            "isEmpty": True,
+            "streaming": False,
+            "detection": ""
+        },
+        "wasteWaterTank": {
+            "full": False,
+            "removed": False
+        },
+        "exhaustFan": {
+            "speed": "off",
+            "dc12VStatus": "no-error",
+            "numberOfOverCurrent": 0
+        },
+        "waterTank": {
+            "removed": False,
+            "empty": False,
+            "low": False
+        },
+        "fan": {
+            "failed": False,
+            "speed": "max"
+        },
+        "ledFan": {
+            "numberOfOverCurrent": 1,
+            "speed": "mid",
+            "dc12VStatus": "no-error"
+        },
+        "timer": {
+            "mode": "idle"
+        },
+        "displayBoard": {
+            "celsius": 39.1
+        }
+    },
+    "systemInfo": {
+        "lastDisconnectedTimestamp": "2026-03-25T19: 10: 00Z",
+        "ramFree": 2942,
+        "powerMains": 120,
+        "firmwareUpdatedTimestamp": "2026-01-12T09: 30: 59Z",
+        "online": True,
+        "deviceId": "0123d1e411114d5401",
+        "lastConnectedTimestamp": "2025-11-18T07: 21: 36Z",
+        "powerHertz": 60,
+        "releaseTrack": "production",
+        "flashFree": 6892,
+        "firmwareVersion": "11_225_1.4.2_01.01.26",
+        "hardwareVersion": "nxpke1-i500"
+    },
+    "state": {
+        "processedCommandIds": [
+            "40be841c-528e-4a2f-a9af-74378d84714d",
+            "6749bffd-23ed-493b-882f-191cfbcbbfdf",
+            "e1473853-dffb-454c-97e4-571d774d2775",
+            "29a601f5-39eb-46a2-8709-dd50e2c888ef",
+            "6bae8bde-3850-4590-98f9-2ac4c967593a",
+            "8b3d0ec0-8970-48cd-8e24-a687a55ae586",
+            "44a72f13-5dcf-4bac-8826-9f252ff8b2cc",
+            "3be0ef4b-503a-48c2-ad9d-5d5977f456bd",
+            "9a5ca457-ba87-4b85-9d00-7a02c5e383c8",
+            "295eb462-b1f3-4fbf-93f7-531ac1a53b5f"
+        ],
+        "mode": "idle",
+        "cavityOverheated": False,
+        "temperatureUnit": "F"
+    },
+    "version": 2,
+    "updatedTimestamp": "2026-04-10T03: 25: 11.474Z"
+}

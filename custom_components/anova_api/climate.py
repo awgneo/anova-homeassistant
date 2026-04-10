@@ -98,10 +98,19 @@ class AnovaOven(ClimateEntity):
             return
 
         try:
-            curr_stage = state.cook.current_stage
+            curr_stage = state.cook.current_stage if state.cook else None
+            
             if curr_stage:
                 self._active_mode = "wet" if curr_stage.sous_vide else "dry"
+            else:
+                self._active_mode = state.nodes.temperature_bulbs_mode
+                
+            if curr_stage and curr_stage.temperature > 0:
                 self._attr_target_temperature = curr_stage.temperature
+            elif self._active_mode == "wet":
+                self._attr_target_temperature = state.nodes.setpoint_wet_temp
+            else:
+                self._attr_target_temperature = state.nodes.setpoint_dry_temp
                 
             if state.nodes.display_board_celsius > 0:
                 self._attr_current_temperature = state.nodes.display_board_celsius
