@@ -38,9 +38,9 @@ def cook_to_payload(cook: APOCook, device: AnovaDevice) -> dict:
             
         # Clamp temperature constraints based on model and elements
         target_temp = stage.temperature
-        if device.model == "oven_v2" and stage.heating_elements == APOHeatingElement.BOTTOM and target_temp > 230.0:
+        if device.model in ("oven", "oven_v2") and stage.heating_elements == APOHeatingElement.BOTTOM and target_temp > 230.0:
             target_temp = 230.0 # 446F Limit
-        elif device.model != "oven_v2" and stage.heating_elements == APOHeatingElement.BOTTOM and target_temp > 180.0:
+        elif device.model not in ("oven", "oven_v2") and stage.heating_elements == APOHeatingElement.BOTTOM and target_temp > 180.0:
             target_temp = 180.0 # 356F Limit
             
         top_on = "top" in stage.heating_elements.value
@@ -62,7 +62,7 @@ def cook_to_payload(cook: APOCook, device: AnovaDevice) -> dict:
             mode: {"setpoint": {"celsius": target_temp}}
         }
         
-        if device.model == "oven_v2":
+        if device.model in ("oven", "oven_v2"):
             # v2 oven schema
             s_dict = {
                 "id": stage.id,
@@ -151,7 +151,7 @@ def cook_to_payload(cook: APOCook, device: AnovaDevice) -> dict:
         "stages": stages
     }
     
-    if device.model == "oven_v2":
+    if device.model in ("oven", "oven_v2"):
         inner_payload.update({
             "type": "oven",
             "originSource": "api",

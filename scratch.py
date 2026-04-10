@@ -1,28 +1,73 @@
-import sys, os
 import json
 import uuid
 
-# Mock everything
-import sys
-from unittest.mock import MagicMock
-sys.modules['homeassistant'] = MagicMock()
-sys.modules['homeassistant.const'] = MagicMock()
-sys.modules['homeassistant.helpers'] = MagicMock()
+def generate_uuid():
+    return str(uuid.uuid4())
 
-def gen_uuid(): return "11111111-2222-3333-4444-555555555555"
+command = {
+    "command": "CMD_APO_START",
+    "payload": {
+        "id": "device_id",
+        "payload": {
+            "stages": [
+                {
+                    "id": generate_uuid(),
+                    "do": {
+                        "type": "cook",
+                        "fan": {
+                            "speed": 100
+                        },
+                        "heatingElements": {
+                            "top": {"on": False},
+                            "bottom": {"on": True},
+                            "rear": {"on": True}
+                        },
+                        "exhaustVent": {
+                            "state": "closed"
+                        },
+                        "temperatureBulbs": {
+                            "mode": "dry",
+                            "dry": {
+                                "setpoint": {
+                                    "celsius": 100
+                                }
+                            }
+                        },
+                        "steamGenerators": {
+                            "mode": "relative-humidity",
+                            "relativeHumidity": {
+                                "setpoint": 0
+                            }
+                        },
+                        "timer": {
+                            "initial": 1800
+                        }
+                    },
+                    "exit": {
+                        "conditions": {
+                            "and": {
+                                "nodes.timer.mode": {
+                                    "=": "completed"
+                                }
+                            }
+                        }
+                    },
+                    "title": "",
+                    "description": "",
+                    "rackPosition": 3
+                }
+            ],
+            "cookId": generate_uuid(),
+            "cookerId": "device_id",
+            "cookableId": "",
+            "title": "",
+            "type": "oven",
+            "originSource": "api",
+            "cookableType": "manual"
+        },
+        "type": "CMD_APO_START"
+    },
+    "requestId": generate_uuid()
+}
 
-from custom_components.anova_api.anova_lib.apo.transpiler import synthesize_cook_from_nodes, cook_to_payload
-from custom_components.anova_api.anova_lib.client import AnovaDevice
-from custom_components.anova_api.anova_lib.apo.models import APONodes
-
-nodes = APONodes()
-nodes.temperature_bulbs_mode = "dry"
-nodes.setpoint_dry_temp = 180.0
-nodes.top_heater_on = False
-nodes.bottom_heater_on = False
-nodes.rear_heater_on = True
-
-cook = synthesize_cook_from_nodes(nodes)
-device = AnovaDevice("0123d1e411114d5401", "oven", "oven_v2")
-payload = cook_to_payload(cook, device)
-print(json.dumps(payload, indent=2))
+print(json.dumps(command, indent=2))
