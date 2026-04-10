@@ -70,35 +70,27 @@ class AnovaSousVideSwitch(SwitchEntity):
             return
             
         state = self._client.get_apo_state(self._device_id)
-        if not state:
+        if not state or not state.cook:
             return
 
         try:
-            raw_payload = state.raw_state.get("payload", {})
-            active_id = raw_payload.get("activeStageId")
-            stages = raw_payload.get("stages", [])
-            active_stage = stages[0] if stages else {}
-            for s in stages:
-                if s.get("id") == active_id:
-                    active_stage = s
-                    break
-            
-            do_block = active_stage.get("do", active_stage)
-            mode = do_block.get("temperatureBulbs", {}).get("mode")
-            if mode:
-                self._attr_is_on = (mode == "wet")
+            curr_stage = state.cook.current_stage
+            if curr_stage:
+                self._attr_is_on = curr_stage.sous_vide
                 self.async_write_ha_state()
         except Exception:
             pass
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn the entity on."""
-        await self._client.patch_active_stage(self._device_id, {
-            "temperatureBulbs": {"mode": "wet"}
-        })
+        cook = self._client.get_current_cook(self._device_id)
+        if cook and cook.current_stage:
+            cook.current_stage.sous_vide = True
+            await self._client.play_cook(self._device_id, cook)
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn the entity off."""
-        await self._client.patch_active_stage(self._device_id, {
-            "temperatureBulbs": {"mode": "dry"}
-        })
+        cook = self._client.get_current_cook(self._device_id)
+        if cook and cook.current_stage:
+            cook.current_stage.sous_vide = False
+            await self._client.play_cook(self._device_id, cook)

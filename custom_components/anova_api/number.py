@@ -11,7 +11,7 @@ from homeassistant.helpers.device_registry import DeviceInfo
 
 from .const import DOMAIN
 from .anova_lib.client import AnovaClient
-from .anova_lib.models import DeviceType
+from .anova_lib.models import DeviceType, APOTimer, APOTimerTrigger
 
 
 async def async_setup_entry(
@@ -28,7 +28,6 @@ async def async_setup_entry(
             entities.extend([
                 AnovaSteamPercentage(client, device_id, device.name, device.model),
                 AnovaTimerTarget(client, device_id, device.name, device.model),
-                AnovaProbeTarget(client, device_id, device.name, device.model),
             ])
             
     async_add_entities(entities)
@@ -63,39 +62,21 @@ class AnovaSteamPercentage(NumberEntity):
     def _handle_update(self, device_id: str, payload: dict) -> None:
         if device_id != self._device_id: return
         state = self._client.get_apo_state(device_id)
-        if not state: return
+        if not state or not state.cook: return
         
         try:
-            raw = state.raw_state.get("payload", {})
-            active_id = raw.get("activeStageId")
-            stages = raw.get("stages", [])
-            active_stage = stages[0] if stages else {}
-            for s in stages:
-                if s.get("id") == active_id:
-                    active_stage = s
-                    break
-            
-            do_block = active_stage.get("do", active_stage)
-            mode = do_block.get("steamGenerators", {}).get("mode")
-            if mode == "steam-percentage":
-                val = do_block.get("steamGenerators", {}).get("steamPercentage", {}).get("setpoint", 0)
-                self._attr_native_value = val
-            elif mode == "relative-humidity":
-                val = do_block.get("steamGenerators", {}).get("relativeHumidity", {}).get("setpoint", 0)
-                self._attr_native_value = val
-            else:
-                self._attr_native_value = 0
-                
-            self.async_write_ha_state()
+            curr_stage = state.cook.current_stage
+            if curr_stage:
+                # If dry mode, steam should be effectively 0 in UI? The transpiler handles setting steam in dry to 0 sometimes.
+                self._attr_native_value = curr_stage.steam
+                self.async_write_ha_state()
         except: pass
 
     async def async_set_native_value(self, value: float) -> None:
-        await self._client.patch_active_stage(self._device_id, {
-            "steamGenerators": {
-                "mode": "steam-percentage",
-                "steamPercentage": {"setpoint": int(value)}
-            }
-        })
+        cook = self._client.get_current_cook(self._device_id)
+        if cook and cook.current_stage:
+            cook.current_stage.steam = int(value)
+            await self._client.play_cook(self._device_id, cook)
 
 
 class AnovaTimerTarget(NumberEntity):
@@ -127,85 +108,20 @@ class AnovaTimerTarget(NumberEntity):
     def _handle_update(self, device_id: str, payload: dict) -> None:
         if device_id != self._device_id: return
         state = self._client.get_apo_state(device_id)
-        if not state: return
+        if not state or not state.cook: return
         
         try:
-            raw = state.raw_state.get("payload", {})
-            active_id = raw.get("activeStageId")
-            stages = raw.get("stages", [])
-            active_stage = stages[0] if stages else {}
-            for s in stages:
-                if s.get("id") == active_id:
-                    active_stage = s
-                    break
-            
-            val = active_stage.get("do", active_stage).get("timer", {}).get("initial")
-            if val is not None:
-                self._attr_native_value = int(val / 60.0) # convert seconds to minutes
+            curr_stage = state.cook.current_stage
+            if curr_stage and isinstance(curr_stage.advance, APOTimer):
+                self._attr_native_value = int(curr_stage.advance.duration / 60.0) # show minutes
                 self.async_write_ha_state()
         except: pass
 
     async def async_set_native_value(self, value: float) -> None:
-        await self._client.patch_active_stage(self._device_id, {
-            "timer": {"initial": int(value * 60)}
-        })
+        cook = self._client.get_current_cook(self._device_id)
+        if cook and cook.current_stage:
+            # We assume a manual trigger for simple slider adjustments!
+            cook.current_stage.advance = APOTimer(duration=int(value * 60), trigger=APOTimerTrigger.MANUALLY)
+            await self._client.play_cook(self._device_id, cook)
 
 
-class AnovaProbeTarget(NumberEntity):
-    """Probe target temperature slider."""
-
-    _attr_has_entity_name = True
-    _attr_name = "Probe Target"
-    _attr_icon = "mdi:thermometer"
-    _attr_native_min_value = 1
-    _attr_native_max_value = 100
-    _attr_native_step = 1
-
-    def __init__(self, client: AnovaClient, device_id: str, name: str, model: str) -> None:
-        self._client = client
-        self._device_id = device_id
-        self._attr_unique_id = f"anova_apo_{device_id}_probe"
-        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, device_id)})
-        self._remove_cb = None
-
-    async def async_added_to_hass(self) -> None:
-        self._remove_cb = self._client.register_callback(self._handle_update)
-        self._handle_update(self._device_id, {})
-
-    async def async_will_remove_from_hass(self) -> None:
-        if self._remove_cb:
-            self._remove_cb()
-
-    @callback
-    def _handle_update(self, device_id: str, payload: dict) -> None:
-        if device_id != self._device_id: return
-        state = self._client.get_apo_state(device_id)
-        if not state: return
-        
-        try:
-            raw = state.raw_state.get("payload", {})
-            # Look at probe object globally or in stages? Probe is generally at the root or do block
-            val = None
-            if "probe" in raw:
-                val = raw.get("probe", {}).get("setpoint", {}).get("celsius")
-                
-            if val is not None:
-                self._attr_native_value = val
-                self.async_write_ha_state()
-        except: pass
-
-    async def async_set_native_value(self, value: float) -> None:
-        cmd = {
-            "command": "CMD_APO_SET_PROBE",
-            "requestId": str(uuid.uuid4()),
-            "payload": {
-                "id": self._device_id,
-                "type": "CMD_APO_SET_PROBE",
-                "payload": {
-                    "setpoint": {
-                        "celsius": float(value)
-                    }
-                }
-            }
-        }
-        await self._client.send_command(cmd)

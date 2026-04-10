@@ -8,7 +8,10 @@ import uuid
 from typing import Dict, Callable, Any, Optional
 
 import aiohttp
-from .models import AnovaDevice, APCState, APOState, DeviceType
+from .device import AnovaDevice, DeviceType
+from .apo import APOState, APOCook
+from .apc import APCState
+from . import apo, apc
 from .exceptions import AnovaConnectionError, AnovaAuthError, AnovaTimeoutError
 
 _LOGGER = logging.getLogger(__name__)
@@ -99,88 +102,28 @@ class AnovaClient:
                 d[k] = v
         return d
 
-    async def patch_active_stage(self, device_id: str, overrides: Dict[str, Any]) -> None:
-        """Patch the active cooking stage without destroying the whole cook."""
+    def get_current_cook(self, device_id: str) -> Optional[APOCook]:
+        """Fetch the current universally represented active cook."""
+        state = self._apo_states.get(device_id)
+        if state and state.cook:
+            return copy.deepcopy(state.cook)
+        return None
+
+    async def play_cook(self, device_id: str, cook: APOCook):
+        """Skinny network wrapper for transmitting an APOCook transpiled payload."""
         device = self._devices.get(device_id)
         if not device or device.type != DeviceType.APO:
             return
-
-        state = self._apo_states.get(device_id)
-        raw_state = state.raw_state.get("payload", {}) if state else {}
-        stages = raw_state.get("stages", [])
+            
+        payload_dict = apo.cook_to_payload(cook, device.model)
         
-        # Determine target to patch (active stage or stage 0)
-        if stages:
-            new_stages = copy.deepcopy(stages)
-        else:
-            if device.model == "oven_v2":
-                new_stages = [{
-                    "id": str(uuid.uuid4()),
-                    "title": "",
-                    "description": "",
-                    "do": {
-                        "type": "cook",
-                        "fan": { "speed": 100 },
-                        "heatingElements": { "top": {"on": False}, "bottom": {"on": False}, "rear": {"on": True} },
-                        "exhaustVent": { "state": "closed" },
-                        "temperatureBulbs": { "mode": "dry", "dry": { "setpoint": { "celsius": 175 } } },
-                    },
-                    "exit": { "conditions": { "and": {} } },
-                    "entry": { "conditions": { "and": {} } },
-                    "rackPosition": 3
-                }]
-            else:
-                new_stages = [{
-                    "id": str(uuid.uuid4()),
-                    "stepType": "stage",
-                    "type": "cook",
-                    "title": "",
-                    "description": "",
-                    "userActionRequired": False,
-                    "fan": { "speed": 100 },
-                    "heatingElements": { "top": {"on": False}, "bottom": {"on": False}, "rear": {"on": True} },
-                    "vent": { "open": False },
-                    "temperatureBulbs": { "mode": "dry", "dry": { "setpoint": { "celsius": 175 } } },
-                    "stageTransitionType": "automatic",
-                    "rackPosition": 3
-                }]
-
-        # Patch the active stage (or index 0 if not found)
-        # Because Anova v1 and v2 nest differently, we patch both the top-level stage AND the 'do' block if it exists
-        target_stage = new_stages[0]
-        active_id = raw_state.get("activeStageId")
-        if active_id:
-            for s in new_stages:
-                if s.get("id") == active_id:
-                    target_stage = s
-                    break
-
-        self._deep_update(target_stage, overrides)
-        if "do" in target_stage:
-            self._deep_update(target_stage["do"], overrides)
-
-        inner_payload = {
-            "cookId": raw_state.get("cookId") or str(uuid.uuid4()),
-            "stages": new_stages
-        }
-        
-        if device.model == "oven_v2":
-            inner_payload.update({
-                "cookerId": device_id,
-                "type": device.model,
-                "originSource": "api",
-                "cookableType": "manual",
-                "cookableId": "",
-                "title": ""
-            })
-
         cmd = {
             "command": "CMD_APO_START",
             "requestId": str(uuid.uuid4()),
             "payload": {
                 "id": device_id,
                 "type": "CMD_APO_START",
-                "payload": inner_payload
+                "payload": payload_dict
             }
         }
         await self.send_command(cmd)
@@ -256,29 +199,17 @@ class AnovaClient:
 
     def _update_apc_state(self, device_id: str, payload: Dict[str, Any]):
         """Update internal APC state based on raw payload."""
-        if device_id not in self._apc_states:
-            self._apc_states[device_id] = APCState()
-        
-        state = self._apc_states[device_id]
-        state.state = payload.get("status", payload.get("state", state.state))
-        state.current_temperature = payload.get("temperature", state.current_temperature)
-        state.target_temperature = payload.get("targetTemperature", state.target_temperature)
-        state.is_running = state.state in ["cooking", "preheating"]
+        existing = self._apc_states.get(device_id)
+        try:
+            self._apc_states[device_id] = apc.payload_to_state(payload, existing_state=existing)
+        except Exception as e:
+            _LOGGER.error("Transpiler failed to unmarshal APC payload: %s", e)
         
     def _update_apo_state(self, device_id: str, payload: Dict[str, Any]):
         """Update internal APO state based on raw payload."""
-        if device_id not in self._apo_states:
-            self._apo_states[device_id] = APOState()
-            
-        state = self._apo_states[device_id]
-        state.raw_state = payload
-        
-        # State mapping is highly speculative without full telemetry logs.
-        # Store raw payload entirely and parse common fields.
-        status = payload.get("status", payload.get("state"))
-        if status is not None:
-            state.state = status
-            state.is_running = status.lower() not in ["idle", "stopped", "standby"]
-        else:
-            # If no explicit status string, we can infer running state if there's an active stage
-            state.is_running = bool(payload.get("activeStageId"))
+        # Power the APO transpilation engine
+        try:
+            state = apo.payload_to_state(payload)
+            self._apo_states[device_id] = state
+        except Exception as e:
+            _LOGGER.error("Transpiler failed to unmarshal payload: %s", e)

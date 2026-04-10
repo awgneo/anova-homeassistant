@@ -9,7 +9,10 @@ from homeassistant.helpers.device_registry import DeviceInfo
 
 from .const import DOMAIN
 from .anova_lib.client import AnovaClient
-from .anova_lib.models import DeviceType
+from .anova_lib.models import DeviceType, APOHeatingElement, APOFanSpeed, APOTimerTrigger
+
+import hashlib
+import uuid
 
 
 async def async_setup_entry(
@@ -28,6 +31,7 @@ async def async_setup_entry(
                 AnovaRecipeSelect(client, device_id, device.name, device.model, recipes),
                 AnovaHeatingElementSelect(client, device_id, device.name, device.model),
                 AnovaFanSpeedSelect(client, device_id, device.name, device.model),
+                AnovaTimerTriggerSelect(client, device_id, device.name, device.model),
             ])
             
     async_add_entities(entities)
@@ -47,23 +51,95 @@ class AnovaRecipeSelect(SelectEntity):
         self._attr_unique_id = f"anova_apo_{device_id}_recipe_select"
         self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, device_id)})
         
-        self._attr_options = ["None"] + [r.get("name", "Unnamed") for r in self._recipes]
+        self._attr_options = ["None", "Manual / App Cook"] + [r.get("name", "Unnamed") for r in self._recipes]
         self._attr_current_option = "None"
+        self._remove_cb = None
+
+    def _hash_recipe_name(self, name: str) -> str:
+        """Create deterministic string identity based on string payload for API mapping."""
+        md5 = hashlib.md5(name.encode('utf-8')).hexdigest()
+        return str(uuid.UUID(md5))
+
+    async def async_added_to_hass(self) -> None:
+        self._remove_cb = self._client.register_callback(self._handle_update)
+        self._handle_update(self._device_id, {})
+
+    async def async_will_remove_from_hass(self) -> None:
+        if self._remove_cb:
+            self._remove_cb()
 
     @property
     def options(self) -> list[str]:
         """Return dynamically loaded recipe options."""
-        return ["None"] + [r.get("name", "Unnamed") for r in self._recipes]
+        return ["None", "Manual / App Cook"] + [r.get("name", "Unnamed") for r in self._recipes]
+
+    @callback
+    def _handle_update(self, device_id: str, payload: dict) -> None:
+        """Update options if the global recipe list changes."""
+        if device_id != self._device_id: return
+        state = self._client.get_apo_state(device_id)
+        if not state: return
+        
+        if not state.is_running or not state.cook:
+            if self._attr_current_option != "None":
+                self._attr_current_option = "None"
+                self.async_write_ha_state()
+            return
+            
+        incoming_cook_id = state.cook.cook_id
+        matched_name = "Manual / App Cook"
+        for r in self._recipes:
+            name = r.get("name", "Unnamed")
+            if self._hash_recipe_name(name) == incoming_cook_id:
+                matched_name = name
+                break
+                
+        if self._attr_current_option != matched_name:
+            self._attr_current_option = matched_name
+            self.async_write_ha_state()
 
     async def async_select_option(self, option: str) -> None:
         """Change the selected option."""
-        self._attr_current_option = option
-        self.async_write_ha_state()
+        if option in ("None", "Manual / App Cook"):
+            # Can't directly start these
+            return
 
-    @callback
-    def _handle_update(self) -> None:
-        """Update options if the global recipe list changes."""
-        self.async_write_ha_state()
+        recipe_data = next((r for r in self._recipes if r.get("name") == option), None)
+        if not recipe_data: return
+        
+        from .anova_lib.apo.models import APOStage, APORecipe, APOCook, APOTimer, APOProbe
+        stgs = []
+        for s_data in recipe_data.get("stages", []):
+            stg = APOStage()
+            stg.sous_vide = s_data.get("sous_vide", False)
+            stg.temperature = float(s_data.get("temperature", 0.0))
+            stg.steam = int(s_data.get("steam", 0))
+            
+            fan_map = {"high": APOFanSpeed.HIGH, "medium": APOFanSpeed.MEDIUM, "low": APOFanSpeed.LOW, "off": APOFanSpeed.OFF}
+            stg.fan = fan_map.get(s_data.get("fanSpeed", "high").lower(), APOFanSpeed.HIGH)
+            
+            h_raw = s_data.get("heatingElements", "rear").lower()
+            if "top" in h_raw and "bottom" in h_raw: stg.heating_elements = APOHeatingElement.TOP_BOTTOM
+            elif "top" in h_raw and "rear" in h_raw: stg.heating_elements = APOHeatingElement.TOP_REAR
+            elif "bottom" in h_raw and "rear" in h_raw: stg.heating_elements = APOHeatingElement.BOTTOM_REAR
+            elif "top" in h_raw: stg.heating_elements = APOHeatingElement.TOP
+            elif "bottom" in h_raw: stg.heating_elements = APOHeatingElement.BOTTOM
+            else: stg.heating_elements = APOHeatingElement.REAR
+            
+            if s_data.get("type") == "timer":
+                dur = int(s_data.get("duration", 0))
+                # Universal schema expects seconds here usually? Wait, anova-panel sets duration in MINUTES? Let's check panel.
+                # Panel actually creates recipes via websocket, wait. We'll assume the frontend sets recipe duration in seconds!
+                # Actually APO timer duration is mostly seconds.
+                stg.advance = APOTimer(duration=dur, trigger=APOTimerTrigger.IMMEDIATELY)
+            elif s_data.get("type") == "probe":
+                stg.advance = APOProbe(target=float(s_data.get("probeTarget", 0.0)))
+                
+            stgs.append(stg)
+            
+        recipe = APORecipe(title=option, stages=stgs)
+        cook = APOCook(recipe=recipe, cook_id=self._hash_recipe_name(option))
+        await self._client.play_cook(self._device_id, cook)
 
 
 class AnovaHeatingElementSelect(SelectEntity):
@@ -94,45 +170,34 @@ class AnovaHeatingElementSelect(SelectEntity):
     def _handle_update(self, device_id: str, payload: dict) -> None:
         if device_id != self._device_id: return
         state = self._client.get_apo_state(device_id)
-        if not state: return
+        if not state or not state.cook: return
         
         try:
-            raw = state.raw_state.get("payload", {})
-            stages = raw.get("stages", [])
-            active_stage = stages[0] if stages else {}
-            for s in stages:
-                if s.get("id") == raw.get("activeStageId"):
-                    active_stage = s
-                    break
-            
-            elements = active_stage.get("do", active_stage).get("heatingElements", {})
-            top = elements.get("top", {}).get("on", False)
-            rear = elements.get("rear", {}).get("on", False)
-            bot = elements.get("bottom", {}).get("on", False)
-            
-            if top and bot: self._attr_current_option = "Top + Bottom"
-            elif top and rear: self._attr_current_option = "Top + Rear"
-            elif bot and rear: self._attr_current_option = "Bottom + Rear"
-            elif bot: self._attr_current_option = "Bottom"
-            elif top: self._attr_current_option = "Top"
-            else: self._attr_current_option = "Rear"
-            self.async_write_ha_state()
+            curr_stage = state.cook.current_stage
+            if curr_stage:
+                h = curr_stage.heating_elements
+                if h == APOHeatingElement.TOP_BOTTOM: self._attr_current_option = "Top + Bottom"
+                elif h == APOHeatingElement.TOP_REAR: self._attr_current_option = "Top + Rear"
+                elif h == APOHeatingElement.BOTTOM_REAR: self._attr_current_option = "Bottom + Rear"
+                elif h == APOHeatingElement.BOTTOM: self._attr_current_option = "Bottom"
+                elif h == APOHeatingElement.TOP: self._attr_current_option = "Top"
+                else: self._attr_current_option = "Rear"
+                self.async_write_ha_state()
         except: pass
 
     async def async_select_option(self, option: str) -> None:
-        top, rear, bot = False, False, False
-        if "Top" in option: top = True
-        if "Rear" in option: rear = True
-        if "Bottom" in option: bot = True
-        if not (top or rear or bot): rear = True # Fallback
+        cook = self._client.get_current_cook(self._device_id)
+        if not cook or not cook.current_stage: return
+        
+        h = APOHeatingElement.REAR
+        if option == "Top + Bottom": h = APOHeatingElement.TOP_BOTTOM
+        elif option == "Top + Rear": h = APOHeatingElement.TOP_REAR
+        elif option == "Bottom + Rear": h = APOHeatingElement.BOTTOM_REAR
+        elif option == "Bottom": h = APOHeatingElement.BOTTOM
+        elif option == "Top": h = APOHeatingElement.TOP
 
-        await self._client.patch_active_stage(self._device_id, {
-            "heatingElements": {
-                "top": {"on": top},
-                "rear": {"on": rear},
-                "bottom": {"on": bot}
-            }
-        })
+        cook.current_stage.heating_elements = h
+        await self._client.play_cook(self._device_id, cook)
 
 
 class AnovaFanSpeedSelect(SelectEntity):
@@ -163,31 +228,89 @@ class AnovaFanSpeedSelect(SelectEntity):
     def _handle_update(self, device_id: str, payload: dict) -> None:
         if device_id != self._device_id: return
         state = self._client.get_apo_state(device_id)
-        if not state: return
+        if not state or not state.cook: return
         
         try:
-            raw = state.raw_state.get("payload", {})
-            stages = raw.get("stages", [])
-            active_stage = stages[0] if stages else {}
-            for s in stages:
-                if s.get("id") == raw.get("activeStageId"):
-                    active_stage = s
-                    break
-            
-            speed = active_stage.get("do", active_stage).get("fan", {}).get("speed", 100)
-            if speed == 0: self._attr_current_option = "Off"
-            elif speed <= 33: self._attr_current_option = "Low"
-            elif speed <= 66: self._attr_current_option = "Medium"
-            else: self._attr_current_option = "High"
-            self.async_write_ha_state()
+            curr_stage = state.cook.current_stage
+            if curr_stage:
+                f = curr_stage.fan
+                if f == APOFanSpeed.OFF: self._attr_current_option = "Off"
+                elif f == APOFanSpeed.LOW: self._attr_current_option = "Low"
+                elif f == APOFanSpeed.MEDIUM: self._attr_current_option = "Medium"
+                else: self._attr_current_option = "High"
+                self.async_write_ha_state()
         except: pass
 
     async def async_select_option(self, option: str) -> None:
-        val = 100
-        if option == "Off": val = 0
-        elif option == "Low": val = 33
-        elif option == "Medium": val = 66
+        cook = self._client.get_current_cook(self._device_id)
+        if not cook or not cook.current_stage: return
         
-        await self._client.patch_active_stage(self._device_id, {
-            "fan": {"speed": val}
-        })
+        f = APOFanSpeed.HIGH
+        if option == "Off": f = APOFanSpeed.OFF
+        elif option == "Low": f = APOFanSpeed.LOW
+        elif option == "Medium": f = APOFanSpeed.MEDIUM
+        
+        cook.current_stage.fan = f
+        await self._client.play_cook(self._device_id, cook)
+
+
+class AnovaTimerTriggerSelect(SelectEntity):
+    """Timer Trigger logic selector."""
+
+    _attr_has_entity_name = True
+    _attr_name = "Timer Starts"
+    _attr_icon = "mdi:play-circle-outline"
+    _attr_options = ["Immediately", "When Preheated", "Food Detected", "Manually"]
+
+    def __init__(self, client: AnovaClient, device_id: str, name: str, model: str) -> None:
+        self._client = client
+        self._device_id = device_id
+        self._attr_unique_id = f"anova_apo_{device_id}_timer_trigger"
+        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, device_id)})
+        self._attr_current_option = "Manually"
+        self._remove_cb = None
+
+    async def async_added_to_hass(self) -> None:
+        self._remove_cb = self._client.register_callback(self._handle_update)
+        self._handle_update(self._device_id, {})
+
+    async def async_will_remove_from_hass(self) -> None:
+        if self._remove_cb:
+            self._remove_cb()
+
+    @callback
+    def _handle_update(self, device_id: str, payload: dict) -> None:
+        if device_id != self._device_id: return
+        state = self._client.get_apo_state(device_id)
+        if not state or not state.cook: return
+        
+        from .anova_lib.apo.models import APOTimer
+        try:
+            curr_stage = state.cook.current_stage
+            if curr_stage and isinstance(curr_stage.advance, APOTimer):
+                t = curr_stage.advance.trigger
+                if t == APOTimerTrigger.IMMEDIATELY: self._attr_current_option = "Immediately"
+                elif t == APOTimerTrigger.PREHEATED: self._attr_current_option = "When Preheated"
+                elif t == APOTimerTrigger.FOOD_DETECTED: self._attr_current_option = "Food Detected"
+                else: self._attr_current_option = "Manually"
+                self.async_write_ha_state()
+        except: pass
+
+    async def async_select_option(self, option: str) -> None:
+        cook = self._client.get_current_cook(self._device_id)
+        if not cook or not cook.current_stage: return
+        
+        from .anova_lib.apo.models import APOTimer
+        
+        t = APOTimerTrigger.MANUALLY
+        if option == "Immediately": t = APOTimerTrigger.IMMEDIATELY
+        elif option == "When Preheated": t = APOTimerTrigger.PREHEATED
+        elif option == "Food Detected": t = APOTimerTrigger.FOOD_DETECTED
+        
+        if not isinstance(cook.current_stage.advance, APOTimer):
+            # Safe default fallback if timer was not enabled prior
+            cook.current_stage.advance = APOTimer(duration=0, trigger=t)
+        else:
+            cook.current_stage.advance.trigger = t
+            
+        await self._client.play_cook(self._device_id, cook)
