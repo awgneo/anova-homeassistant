@@ -5,9 +5,10 @@ from typing import Any
 from homeassistant.components.water_heater import (
     WaterHeaterEntity,
     WaterHeaterEntityFeature,
-    STATE_ECO,
-    STATE_ELECTRIC,
 )
+
+STATE_ECO = "eco"
+STATE_ELECTRIC = "electric"
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfTemperature
 from homeassistant.core import HomeAssistant, callback
