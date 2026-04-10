@@ -204,7 +204,6 @@ def test_cook_to_payload():
     
     # Verify condition formatting
     assert do_block["timer"]["initial"] == 600
-    assert do_block["timer"]["startType"] == "manual" # Manually trigger
-    
+    assert do_block["timer"]["entry"]["conditions"]["or"]["userAction"]["="] is True # Manually trigger natively mapped to userAction
     # Node telemetry MUST NOT EXIST in upstream payload
     assert "nodes" not in payload

@@ -9,6 +9,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .anova_lib.client import AnovaClient
+from .anova_lib.auth import FirebaseAuthManager
 from .anova_lib.exceptions import AnovaAuthError, AnovaConnectionError
 from .const import DOMAIN, CONF_TOKEN
 
@@ -16,7 +17,8 @@ _LOGGER = logging.getLogger(__name__)
 
 STEP_USER_DATA_SCHEMA = vol.Schema(
     {
-        vol.Required(CONF_TOKEN): str,
+        vol.Required("email"): str,
+        vol.Required("password"): str,
     }
 )
 
@@ -26,15 +28,21 @@ async def validate_input(hass: HomeAssistant, data: dict) -> dict[str, Any]:
 
     Data has the keys from STEP_USER_DATA_SCHEMA with values provided by the user.
     """
-    token = data[CONF_TOKEN]
-    if not token.startswith("anova-"):
-        raise ValueError("invalid_format")
-
+    email = data.get("email")
+    password = data.get("password")
+    
     session = async_get_clientsession(hass)
-    client = AnovaClient(token=token, session=session)
 
+    # User provided native login, fetch the Firebase refresh token
     try:
-        # We try connecting briefly to ensure token works
+        auth_data = await FirebaseAuthManager.login(session, email, password)
+        token = auth_data["refresh_token"]
+    except AnovaAuthError:
+        raise ValueError("invalid_auth")
+
+    # Verify the token actually works in the client model
+    client = AnovaClient(token=token, session=session)
+    try:
         success = await client.connect()
         if not success:
             raise AnovaConnectionError("Connection returned false")
@@ -47,7 +55,7 @@ async def validate_input(hass: HomeAssistant, data: dict) -> dict[str, Any]:
         await client.close()
 
     # Return info to store in the entry
-    return {"title": "Anova WiFi Devices"}
+    return {"title": "Anova WiFi Devices", "token": token}
 
 
 class AnovaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -62,11 +70,10 @@ class AnovaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            self._async_abort_entries_match({CONF_TOKEN: user_input[CONF_TOKEN]})
-
             try:
                 info = await validate_input(self.hass, user_input)
-                return self.async_create_entry(title=info["title"], data=user_input)
+                # Overwrite the user input with the verified token (or Firebase refresh token)
+                return self.async_create_entry(title=info["title"], data={CONF_TOKEN: info["token"]})
             except ValueError as err:
                 errors["base"] = str(err)
             except Exception:  # pylint: disable=broad-except

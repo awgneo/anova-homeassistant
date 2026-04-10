@@ -75,7 +75,7 @@ def cook_to_payload(cook: APOCook, device: AnovaDevice) -> dict:
                     "temperatureBulbs": bulb_dict,
                 },
                 "exit": {"conditions": {"and": {}}},
-                "entry": {"conditions": {"and": {}}}
+                "entry": {"conditions": {"and": {f"nodes.temperatureBulbs.{mode}.current.celsius": {">=": target_temp}}}}
             }
             
             if stage.steam > 0:
@@ -85,9 +85,17 @@ def cook_to_payload(cook: APOCook, device: AnovaDevice) -> dict:
                 }
                 
             if isinstance(stage.advance, APOTimer):
+                trigger_cond = {"and": {}}
+                if stage.advance.trigger == APOTimerTrigger.PREHEATED:
+                    trigger_cond = {"and": {f"nodes.temperatureBulbs.{mode}.current.celsius": {">=": target_temp}}}
+                elif stage.advance.trigger == APOTimerTrigger.MANUALLY:
+                    trigger_cond = {"or": {"userAction": {"=": True}}}
+                elif stage.advance.trigger == APOTimerTrigger.FOOD_DETECTED:
+                    trigger_cond = {"or": {"nodes.cavityCamera.isEmpty": {"=": False}}}
+                
                 s_dict["do"]["timer"] = {
                     "initial": stage.advance.duration,
-                    "entry": {"conditions": {"and": {}}}
+                    "entry": {"conditions": trigger_cond}
                 }
                 s_dict["exit"]["conditions"]["and"] = {"nodes.timer.mode": {"=": "completed"}}
                 
@@ -153,7 +161,7 @@ def cook_to_payload(cook: APOCook, device: AnovaDevice) -> dict:
     
     if device.model in ("oven", "oven_v2"):
         inner_payload.update({
-            "type": "oven",
+            "type": device.model,
             "originSource": "api",
             "cookableType": "manual",
             "cookableId": "",
@@ -162,34 +170,6 @@ def cook_to_payload(cook: APOCook, device: AnovaDevice) -> dict:
         })
         
     return inner_payload
-
-def synthesize_cook_from_nodes(nodes: APONodes) -> APOCook:
-    """Reconstruct an active logical cook session from blind physical telemetry."""
-    s = APOStage(id=_generate_uuid())
-    
-    if nodes.temperature_bulbs_mode == "wet":
-        s.sous_vide = True
-        s.temperature = nodes.setpoint_wet_temp
-        s.steam = 100
-    else:
-        s.sous_vide = False
-        s.temperature = nodes.setpoint_dry_temp
-        s.steam = 0
-            
-    if nodes.top_heater_on and nodes.bottom_heater_on:
-        s.heating_elements = APOHeatingElement.TOP_BOTTOM
-    elif nodes.top_heater_on and nodes.rear_heater_on:
-        s.heating_elements = APOHeatingElement.TOP_REAR
-    elif nodes.bottom_heater_on and nodes.rear_heater_on:
-        s.heating_elements = APOHeatingElement.BOTTOM_REAR
-    elif nodes.top_heater_on:
-        s.heating_elements = APOHeatingElement.TOP
-    elif nodes.bottom_heater_on:
-        s.heating_elements = APOHeatingElement.BOTTOM
-    else:
-        s.heating_elements = APOHeatingElement.REAR
-        
-    return APOCook(cook_id=_generate_uuid(), recipe=APORecipe(title="Recovery", stages=[s]), active_stage_index=0)
 
 def payload_to_state(raw_payload: dict) -> APOState:
     """Parses raw websocket telemetry into a pristine APOState."""

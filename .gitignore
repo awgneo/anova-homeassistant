@@ -1,6 +1,7 @@
 # Ignore AI agent data
 .agent/
 READING/
+reverse_engineering/
 
 # Python caches
 __pycache__/

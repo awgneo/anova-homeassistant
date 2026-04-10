@@ -12,6 +12,7 @@ from .device import AnovaDevice, DeviceType
 from .apo import APOState, APOCook
 from .apc import APCState
 from . import apo, apc
+from .auth import FirebaseAuthManager
 from .exceptions import AnovaConnectionError, AnovaAuthError, AnovaTimeoutError
 
 _LOGGER = logging.getLogger(__name__)
@@ -24,8 +25,10 @@ class AnovaClient:
 
     def __init__(self, token: str, session: Optional[aiohttp.ClientSession] = None):
         """Initialize the Anova client."""
-        self._token = token
         self._session = session or aiohttp.ClientSession()
+        self._token = None
+        self._auth_manager = FirebaseAuthManager(self._session, token)
+
         self._ws: Optional[aiohttp.ClientWebSocketResponse] = None
         self._devices: Dict[str, AnovaDevice] = {}
         self._apc_states: Dict[str, APCState] = {}
@@ -56,6 +59,11 @@ class AnovaClient:
 
     async def connect(self) -> bool:
         """Connect to the Anova websocket."""
+        try:
+            self._token = await self._auth_manager.get_valid_token()
+        except AnovaAuthError as err:
+            raise ValueError("cannot_connect") from err
+
         url = f"{ANOVA_WS_URL}?token={self._token}&supportedAccessories=APC,APO"
         try:
             self._ws = await self._session.ws_connect(
@@ -135,6 +143,16 @@ class AnovaClient:
             
         try:
             async for msg in self._ws:
+                # Proactively rotate token if nearing expiration on the active connection
+                import time
+                if time.time() >= self._auth_manager._expires_at:
+                    _LOGGER.debug("OAuth Token expired mid-stream, rotating via reconnect.")
+                    # Rotating means we must drop and explicitly reconnect since tokens
+                    # are passed dynamically in query parameters only on handshake.
+                    await self.close()
+                    await self.connect()
+                    return
+                        
                 if msg.type == aiohttp.WSMsgType.TEXT:
                     try:
                         data = json.loads(msg.data)

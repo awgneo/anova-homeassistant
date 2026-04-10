@@ -102,22 +102,23 @@ class AnovaOven(ClimateEntity):
             
             if curr_stage:
                 self._active_mode = "wet" if curr_stage.sous_vide else "dry"
-            else:
-                self._active_mode = state.nodes.temperature_bulbs_mode
-                
-            if curr_stage and curr_stage.temperature > 0:
                 self._attr_target_temperature = curr_stage.temperature
-            elif self._active_mode == "wet":
-                self._attr_target_temperature = state.nodes.setpoint_wet_temp
-            else:
-                self._attr_target_temperature = state.nodes.setpoint_dry_temp
                 
-            if state.nodes.display_board_celsius > 0:
-                self._attr_current_temperature = state.nodes.display_board_celsius
-            elif self._active_mode == "wet":
-                self._attr_current_temperature = state.nodes.current_wet_temp
+                # Default current temp to strictly match display board if possible to accurately mimic UI sync
+                if state.nodes.display_board_celsius > 0:
+                    self._attr_current_temperature = state.nodes.display_board_celsius
+                elif self._active_mode == "wet":
+                    self._attr_current_temperature = state.nodes.current_wet_temp
+                else:
+                    self._attr_current_temperature = state.nodes.current_dry_temp
             else:
-                self._attr_current_temperature = state.nodes.current_dry_temp
+                self._active_mode = "dry"
+                self._attr_target_temperature = 0.0
+                
+                if state.nodes.display_board_celsius > 0:
+                    self._attr_current_temperature = state.nodes.display_board_celsius
+                else:
+                    self._attr_current_temperature = state.nodes.current_dry_temp
         except Exception:
             pass
             
@@ -143,13 +144,8 @@ class AnovaOven(ClimateEntity):
             
         cook = self._client.get_current_cook(self._device_id)
         if not cook or not cook.current_stage:
-            state = self._client.get_apo_state(self._device_id)
-            if state and state.nodes:
-                from .anova_lib.apo.transpiler import synthesize_cook_from_nodes
-                cook = synthesize_cook_from_nodes(state.nodes)
-            else:
-                from .anova_lib.apo.models import APOCook, APORecipe, APOStage
-                cook = APOCook(recipe=APORecipe(title="Manual Cook", stages=[APOStage()]), active_stage_index=0)
+            from .anova_lib.apo.models import APOCook, APORecipe, APOStage
+            cook = APOCook(recipe=APORecipe(title="Manual Cook", stages=[APOStage()]), active_stage_index=0)
             
         cook.current_stage.temperature = temperature
         await self._client.play_cook(self._device_id, cook)
@@ -173,13 +169,8 @@ class AnovaOven(ClimateEntity):
                 
             cook = self._client.get_current_cook(self._device_id)
             if not cook or not cook.current_stage:
-                state = self._client.get_apo_state(self._device_id)
-                if state and state.nodes:
-                    from .anova_lib.apo.transpiler import synthesize_cook_from_nodes
-                    cook = synthesize_cook_from_nodes(state.nodes)
-                else:
-                    from .anova_lib.apo.models import APOCook, APORecipe, APOStage
-                    cook = APOCook(recipe=APORecipe(title="Manual Cook", stages=[APOStage()]), active_stage_index=0)
+                from .anova_lib.apo.models import APOCook, APORecipe, APOStage
+                cook = APOCook(recipe=APORecipe(title="Manual Cook", stages=[APOStage()]), active_stage_index=0)
                 
             cook.current_stage.temperature = targ
             
